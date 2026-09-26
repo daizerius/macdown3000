@@ -235,16 +235,32 @@ void styleparsing_error_callback(char *error_message, int line_number, void *con
 
     NSAttributedStringEnumerationOptions options =
         NSAttributedStringEnumerationLongestEffectiveRangeNotRequired;
+    NSFont *baseFont = self.defaultTypingAttributes[NSFontAttributeName];
     [textStorage enumerateAttributesInRange:range
                                     options:options
                                  usingBlock:
      ^(NSDictionary *attributes, NSRange range, BOOL *stop) {
          NSFont *font = attributes[NSFontAttributeName];
-         if (!font || font.pointSize == _defaultTextSize)
+         if (!font)
              return;
-         font = [[NSFontManager sharedFontManager] convertFont:font
-                                                        toSize:_defaultTextSize];
-         [textStorage addAttribute:NSFontAttributeName value:font range:range];
+         BOOL sizeMatches = (font.pointSize == _defaultTextSize);
+         BOOL familyMatches = (!baseFont ||
+                                [font.familyName isEqualToString:baseFont.familyName]);
+         if (sizeMatches && familyMatches)
+             return;
+         // A font whose family doesn't match the editor's base font is not
+         // legitimate markdown styling (-applyHighlighting: reapplies that
+         // afterwards from freshly parsed elements) -- it's a leftover
+         // substitution, e.g. AppKit swapping in a non-monospace font to
+         // render an emoji glyph the base font lacks. Since such a
+         // substitution normally keeps the surrounding point size, comparing
+         // sizes alone let it slip through and smear onto everything typed
+         // afterwards. Reset those runs to the base font outright rather
+         // than just resizing whatever font happens to be there.
+         NSFont *fixedFont = familyMatches ? font : (baseFont ?: font);
+         fixedFont = [[NSFontManager sharedFontManager] convertFont:fixedFont
+                                                               toSize:_defaultTextSize];
+         [textStorage addAttribute:NSFontAttributeName value:fixedFont range:range];
      }];
 }
 

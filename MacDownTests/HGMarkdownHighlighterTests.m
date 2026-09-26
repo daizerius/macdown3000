@@ -404,6 +404,66 @@
 }
 
 
+#pragma mark - Font Family Clear Regression Tests (emoji font substitution)
+
+// Reported bug: typing an emoji in the editor leaves every character typed
+// afterwards in a sans-serif font instead of the editor's monospace font.
+//
+// AppKit substitutes a fallback font for glyphs the current font doesn't
+// cover (emoji are not in a monospace font), and that substituted font can
+// end up stored as the NSFontAttributeName for the emoji's run and inherited
+// by text typed after it. -clearHighlightingForRange: is supposed to restore
+// the editor's base font on every edit, but its font-fixing loop only
+// compares -pointSize against the recorded default size — it never checks
+// the font's family/name. A same-size, wrong-family substitution (the emoji
+// case; substituted fonts normally keep the surrounding point size) is
+// therefore left untouched, so the smear survives every subsequent
+// highlight pass instead of self-correcting like Issue #376's size/color
+// smear did.
+- (void)testClearHighlightingResetsFontFamilySmearedByFontSubstitution
+{
+    NSTextView *textView =
+        [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, 400, 400)];
+    NSFont *monospaceFont = [NSFont fontWithName:@"Menlo" size:13.0];
+    textView.font = monospaceFont;
+    textView.textColor = [NSColor blackColor];
+    textView.string = @"abc def ghi";
+
+    HGMarkdownHighlighter *hl =
+        [[HGMarkdownHighlighter alloc] initWithTextView:textView];
+    hl.targetTextView = textView;
+    [hl readClearTextStylesFromTextView];
+
+    // Simulate AppKit's font substitution: a same-size, different-family
+    // font applied to a run following where an emoji would have been typed.
+    NSTextStorage *storage = textView.textStorage;
+    NSUInteger smearStart = [textView.string rangeOfString:@"def"].location;
+    NSRange smearedRange = NSMakeRange(smearStart, storage.length - smearStart);
+    NSFont *substitutedFont = [NSFont fontWithName:@"Helvetica" size:13.0];
+    [storage addAttribute:NSFontAttributeName
+                     value:substitutedFont
+                     range:smearedRange];
+
+    // Precondition: the substituted sans-serif font really is in the storage.
+    NSFont *smearedFont = [storage attribute:NSFontAttributeName
+                                     atIndex:smearStart
+                              effectiveRange:NULL];
+    XCTAssertEqualObjects(smearedFont.familyName, @"Helvetica",
+                          @"Precondition: the substituted font should be in place");
+
+    [hl clearHighlighting];
+
+    NSFont *clearedFont = [storage attribute:NSFontAttributeName
+                                     atIndex:smearStart
+                              effectiveRange:NULL];
+    XCTAssertEqualObjects(clearedFont.familyName, monospaceFont.familyName,
+                          @"clearHighlighting should restore the editor's base font "
+                          @"family, not just its point size, so a same-size font "
+                          @"substitution (e.g. from typing an emoji) doesn't smear "
+                          @"a sans-serif font across the rest of the document");
+}
+
+
 #pragma mark - HandleStyleParsingError Tests
 
 - (void)testHandleStyleParsingErrorWithNilInfo
