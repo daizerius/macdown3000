@@ -223,6 +223,57 @@ static NSString * const kMPTestPrismAbsenceMarker = @"Prism.highlightAll";
 }
 
 
+#pragma mark - Prism Autoloader Tests
+
+// Regression tests for: fenced code blocks are never syntax-highlighted on
+// first open, any document, any language, every launch. The preview's only
+// full page load happens before the document is parsed, so currentLanguages
+// is always empty at that point and no language grammar script is ever
+// emitted for it. Every later content update goes through body.innerHTML,
+// and a <script> written in via innerHTML never executes either -- so a
+// grammar can never arrive afterwards. The autoloader must therefore be
+// present unconditionally, not derived from currentLanguages: it hooks
+// Prism's "complete" callback (which the bundled core does run on the
+// missing-grammar path) and fetches grammars by creating real <script>
+// elements via the DOM API, which execute even after an innerHTML
+// replacement.
+- (void)testPreviewRenderAlwaysIncludesPrismAutoloaderWhenHighlightingEnabled
+{
+    self.delegate.syntaxHighlighting = YES;
+    self.dataSource.markdown = @"Just a plain paragraph, no code block.";
+
+    [self.renderer parseMarkdown:self.dataSource.markdown];
+    [self.renderer render];
+
+    NSString *html = self.delegate.lastHTML;
+    XCTAssertNotNil(html, @"Preview render should produce HTML");
+    XCTAssertTrue([html containsString:@"plugins/autoloader/prism-autoloader.min.js"],
+                  @"Autoloader must be included even when no language is yet known, "
+                  @"since currentLanguages is always empty on the preview's only full "
+                  @"page load");
+    XCTAssertTrue([html containsString:@"prism-autoloader-config.js"],
+                  @"The autoloader's languages_path must be pointed at the app's own "
+                  @"bundled Prism/components directory -- its built-in default is a "
+                  @"relative path, which 404s against the preview's home-directory "
+                  @"base URL");
+}
+
+- (void)testPreviewRenderOmitsPrismAutoloaderWhenHighlightingDisabled
+{
+    self.delegate.syntaxHighlighting = NO;
+    self.dataSource.markdown = @"Just a plain paragraph, no code block.";
+
+    [self.renderer parseMarkdown:self.dataSource.markdown];
+    [self.renderer render];
+
+    NSString *html = self.delegate.lastHTML;
+    XCTAssertNotNil(html, @"Preview render should produce HTML");
+    XCTAssertFalse([html containsString:@"prism-autoloader"],
+                   @"No Prism assets, autoloader included, should load when syntax "
+                   @"highlighting is off");
+}
+
+
 #pragma mark - Extension Combination Tests
 
 - (void)testRendererExtensionTablesOnly

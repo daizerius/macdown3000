@@ -587,6 +587,30 @@ NS_INLINE NSString *MPPreviewHeadTags(NSString *checkboxBridgeToken)
             [scripts addObject:[MPScript javaScriptWithURL:url]];
     }
 
+    // The preview's only full page load happens before the document has
+    // been parsed, so currentLanguages is always empty at that point and no
+    // language grammar ever gets a <script> tag on first open. Every later
+    // content update goes through body.innerHTML, and a <script> written in
+    // via innerHTML never executes -- so a grammar can never arrive
+    // afterwards either. The bundled Prism core's highlightElement also
+    // returns before its "before-highlight" hook when a grammar is missing,
+    // which is why the language chip (show-language) is silently absent
+    // alongside the missing colour.
+    //
+    // The autoloader plugin fixes both: it hooks "complete", which the
+    // bundled core *does* run on the missing-grammar path, and it fetches
+    // grammars by creating real <script> elements via the DOM API -- which
+    // execute even when appended after an innerHTML replacement, unlike a
+    // <script> that was part of the replaced HTML string itself. Always
+    // include it, independent of currentLanguages, so first-open and
+    // languages typed later in the session both get colour.
+    {
+        NSURL *autoloaderURL = MPPrismPluginURL(@"autoloader", @"js");
+        [scripts addObject:[MPScript javaScriptWithURL:autoloaderURL]];
+        NSURL *configURL = MPExtensionURL(@"prism-autoloader-config", @"js");
+        [scripts addObject:[MPScript javaScriptWithURL:configURL]];
+    }
+
     if (self.rendererFlags & HOEDOWN_HTML_BLOCKCODE_LINE_NUMBERS)
     {
         NSURL *url = MPPrismPluginURL(@"line-numbers", @"js");
